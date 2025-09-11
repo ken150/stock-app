@@ -338,7 +338,7 @@ def create_model_and_data():
 
     # モデルの学習
     print("モデルを学習しています...")
-    df_train = pd.read_csv(data_file_path)
+    df_train = pd.read_csv(data_file_path, header=0)
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(df_train['Close'].values.reshape(-1, 1))
 
