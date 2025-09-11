@@ -16,9 +16,9 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 # === プロジェクトルートの絶対パス ===
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# === .env をルートからロード ===
+# === .env をロード ===
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # === DB設定 ===
@@ -146,40 +146,28 @@ def pricing():
 @app.route("/create-checkout-session", methods=["POST"])
 @login_required
 def create_checkout_session():
-    # env から Price ID を取得（必ず price_ で始まる値を使う）
     price_id = os.getenv("STRIPE_PRICE_ID_MONTHLY")
     if not price_id:
         return "Stripe price ID not configured (STRIPE_PRICE_ID_MONTHLY)", 500
 
-    domain = request.host_url.rstrip("/")  # 例: http://localhost:5000
+    domain = request.host_url.rstrip("/")
 
     try:
         session_stripe = stripe.checkout.Session.create(
-            # カード支払いのみ
             payment_method_types=["card"],
-            # サブスクリプションモード（継続課金）
             mode="subscription",
-            # 価格ID（Stripeダッシュボードで作った price_...）
             line_items=[{"price": price_id, "quantity": 1}],
-            # 成功時に受け取るページ。Checkout がここに session_id を差し込みます
             success_url=f"{domain}/checkout-success?session_id={{CHECKOUT_SESSION_ID}}",
-            # キャンセル時戻り先
             cancel_url=f"{domain}/pricing",
-            # 顧客のメールを渡す（任意だが推奨）
             customer_email=current_user.email,
-            # DB と連携させる用のメタデータ（後で webhook で使う）
             metadata={"user_id": current_user.id},
-            # プロモコード等を許可したいなら True に
             allow_promotion_codes=True,
         )
     except stripe.error.StripeError as e:
-        # 本番ではもっと丁寧にログ＆UI向けのエラーを用意する
         return f"Stripe error: {str(e)}", 500
     except Exception as e:
         return f"Server error: {str(e)}", 500
 
-    # セッションの URL にリダイレクト（Checkout ページへ）
-    # stripe-python は session_stripe.url に Checkout の URL が入る
     return redirect(session_stripe.url, code=303)
 
 @app.route("/checkout-success")
@@ -201,10 +189,8 @@ def stripe_webhook():
     except stripe.error.SignatureVerificationError:
         return "Invalid signature", 400
 
-    # checkout.session.completed を捕まえる
     if event["type"] == "checkout.session.completed":
-        session_obj = event["data"]["object"]  # Checkout session object
-        # metadata から user_id を取る（create-checkout-session でセットしている想定）
+        session_obj = event["data"]["object"]
         user_id = session_obj.get("metadata", {}).get("user_id")
         if user_id:
             db = SessionLocal()
@@ -214,21 +200,17 @@ def stripe_webhook():
                 db.commit()
             db.close()
 
-    # ほかのイベントは必要に応じて処理
     return "", 200
 
-
 # === 既存のアプリロジック ===
-# 学習済みモデルをロード
 try:
-    model_path = os.path.abspath(os.path.join(BASE_DIR, 'models', 'stock_predictor_model.h5'))
+    model_path = os.path.join(BASE_DIR, 'models', 'stock_predictor_model.h5')
     model = tf.keras.models.load_model(model_path)
 except OSError:
     print(f"モデルファイルが見つかりません: {model_path}")
-    print("train_model.pyを実行してモデルを作成してください。")
+    print("アプリケーションを起動する前に、train_model.py を実行してください。")
     model = None
 
-# 全銘柄リストを読み込む
 try:
     stock_list_path = os.path.join(BASE_DIR, 'stock_data', 'stock_list.csv')
     stock_list_df_full = pd.read_csv(stock_list_path, encoding='shift_jis')
@@ -237,7 +219,7 @@ try:
     stock_list_df = stock_list_df[['コード', '銘柄名']].copy()
     stock_list_df['コード'] = stock_list_df['コード'].astype(int)
 except FileNotFoundError:
-    print("stock_list.csv が見つかりませんでした。JPXからダウンロードして配置してください。")
+    print("stock_list.csv が見つかりませんでした。train_model.py を実行してください。")
     stock_list_df = pd.DataFrame(columns=['コード', '銘柄名'])
 except KeyError:
     print("CSVファイルの列名が正しくありません。")
@@ -262,7 +244,6 @@ def predict():
     
     is_premium = getattr(current_user, "is_premium", False) or is_dev_user()
 
-    # 無料ユーザーの利用制限
     if not is_premium and not can_free_user_predict(current_user.id):
         return render_template('index.html',
                                prediction="無料プランの本日の利用回数を超えました。プランをアップグレードしてください。",
@@ -295,7 +276,10 @@ def predict():
     predicted_stock_price = model.predict(X_test)
     predicted_stock_price = scaler.inverse_transform(predicted_stock_price)
 
-    company_name = stock_list_df[stock_list_df['コード'] == int(ticker_symbol)]['銘柄名'].iloc[0]
+    try:
+        company_name = stock_list_df[stock_list_df['コード'] == int(ticker_symbol)]['銘柄名'].iloc[0]
+    except IndexError:
+        company_name = f"銘柄名不明 ({ticker_symbol})"
     
     last_known_date = data.index[-1].date()
     predicted_date = last_known_date + timedelta(days=1)
@@ -316,60 +300,4 @@ def predict():
     return render_template('index.html', prediction=prediction_text, stocks=stock_list_df.to_dict('records'), stock_data=stock_data, is_premium=is_premium)
 
 if __name__ == '__main__':
-    init_db()
     app.run(debug=True)
-
-# モデルの学習と保存を行う関数
-def create_model_and_data():
-    # データをダウンロード
-    print("株価データをダウンロードしています...")
-    stock_list_path = os.path.join(BASE_DIR, 'data', 'stock_list.csv')
-    if not os.path.exists(os.path.dirname(stock_list_path)):
-        os.makedirs(os.path.dirname(stock_list_path))
-    if not os.path.exists(stock_list_path):
-        stock_list = pd.DataFrame(columns=['コード', '銘柄名'])
-        stock_list.to_csv(stock_list_path, index=False)
-
-    data_file_path = os.path.join(BASE_DIR, 'data', '7203.T_stock_data.csv')
-    if not os.path.exists(data_file_path):
-        print("トヨタ自動車のデータをダウンロード中...")
-        df_download = yf.download('7203.T', start='2020-01-01', end='2025-01-01')
-        df_download.to_csv(data_file_path)
-
-    # モデルの学習
-    print("モデルを学習しています...")
-    df_train = pd.read_csv(data_file_path, header=0)
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(df_train['Close'].values.reshape(-1, 1))
-
-    # ここにモデル学習のコードを記述
-    model = tf.keras.Sequential([
-        tf.keras.layers.LSTM(50, return_sequences=True, input_shape=(60, 1)),
-        tf.keras.layers.LSTM(50, return_sequences=False),
-        tf.keras.layers.Dense(25),
-        tf.keras.layers.Dense(1)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    
-    # データを学習用に準備
-    training_data = scaled_data[0:len(scaled_data)-60]
-    x_train = []
-    y_train = []
-    for i in range(60, len(training_data)):
-        x_train.append(training_data[i-60:i, 0])
-        y_train.append(training_data[i, 0])
-    x_train, y_train = np.array(x_train), np.array(y_train)
-    x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
-
-    # モデルを学習
-    model.fit(x_train, y_train, batch_size=1, epochs=1)
-
-    # モデルを保存
-    model_dir = 'models'
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-    model.save(os.path.join(model_dir, 'stock_predictor_model.h5'))
-    print("モデルが正常に保存されました。")
-
-# アプリ起動前にモデルとデータを生成
-create_model_and_data()
