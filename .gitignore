@@ -1,0 +1,15 @@
+# 仮想環境
+stock_app_env/
+venv/
+
+# 大きいファイル（モデルやdll）
+*.h5
+*.pkl
+*.pyd
+*.dll
+*.so
+
+# キャッシュ・ログ
+__pycache__/
+*.pyc
+*.log

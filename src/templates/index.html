@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>株価予測アプリ</title>
+    <!-- Tailwind CSS と Chart.js を CDN で読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @keyframes fadeInScale {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-fadeInScale {
+            animation: fadeInScale 0.5s ease-out forwards;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-2xl">
+        <!-- ⭐ ナビゲーションを追加 -->
+        <nav class="w-full flex justify-between items-center mb-4">
+            <a href="/" class="font-semibold text-gray-700">株価予測</a>
+            <div class="flex items-center gap-3">
+                {% if current_user.is_authenticated %}
+                    {% if is_premium %}
+                        <span class="px-2 py-1 text-xs font-bold bg-yellow-100 text-yellow-800 rounded">PREMIUM</span>
+                    {% else %}
+                        <a class="text-blue-600" href="/pricing">アップグレード</a>
+                    {% endif %}
+                    <a class="text-gray-600" href="/logout">ログアウト</a>
+                {% else %}
+                    <a class="text-blue-600" href="/login">ログイン</a>
+                    <a class="text-blue-600" href="/signup">新規登録</a>
+                {% endif %}
+            </div>
+        </nav>
+        
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">株価予測アプリ</h1>
+        <p class="text-gray-600 text-center mb-6">予測する銘柄を選択してください。</p>
+
+        <!-- フォーム -->
+        <form id="prediction-form" action="/predict" method="post" class="space-y-4">
+            <div>
+                <label for="stock-select" class="block text-gray-700 text-sm font-semibold mb-2">銘柄を選択:</label>
+                <input type="text" id="stock-search" placeholder="銘柄名またはコードで検索..." class="w-full p-3 mb-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ease-in-out">
+                <select name="ticker" id="stock-select" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ease-in-out">
+                    {% for stock in stocks %}
+                    <option value="{{ stock['コード'] }}">{{ stock['銘柄名'] }} ({{ stock['コード'] }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" id="predict-button" class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 active:bg-blue-800 transition duration-200 ease-in-out transform hover:scale-105 active:scale-95 shadow-md">
+                予測する
+            </button>
+        </form>
+
+        <!-- ローディング表示 -->
+        <div id="loading-indicator" class="hidden mt-8 p-4 bg-yellow-50 rounded-lg text-center text-yellow-800 font-bold text-lg shadow-inner flex items-center justify-center space-x-2">
+            <svg class="animate-spin h-5 w-5 text-yellow-800" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>予測中...</span>
+        </div>
+
+        {% if prediction %}
+        <!-- 予測結果の表示 -->
+        <div id="prediction-result" class="mt-8 p-4 bg-blue-50 rounded-lg text-center text-blue-800 font-bold text-lg shadow-inner animate-fadeInScale">
+            {{ prediction }}
+        </div>
+
+        <!-- ⭐ 有料ユーザー向けにグラフを表示、無料ユーザーにはアップグレード案内を表示 -->
+        {% if is_premium %}
+        <div class="mt-8 chart-container">
+            <canvas id="stockChart"></canvas>
+        </div>
+        {% else %}
+        <div class="mt-8 p-4 bg-gray-200 rounded-lg text-center text-gray-700 shadow-inner">
+            <p class="font-bold">有料会員になるとグラフと詳細な予測値が見れます！</p>
+            <a href="/pricing" class="mt-2 inline-block bg-green-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-600 transition">アップグレードする</a>
+        </div>
+        {% endif %}
+        
+        {% endif %}
+
+        <script>
+            const stocksData = {{ stocks | tojson }};
+            const selectElement = document.getElementById('stock-select');
+            const searchInput = document.getElementById('stock-search');
+
+            function filterStocks() {
+                const filter = searchInput.value.toUpperCase();
+                const filteredStocks = stocksData.filter(stock => 
+                    stock['銘柄名'].toUpperCase().includes(filter) || 
+                    String(stock['コード']).includes(filter)
+                );
+                selectElement.innerHTML = '';
+                filteredStocks.forEach(stock => {
+                    const option = document.createElement('option');
+                    option.value = stock['コード'];
+                    option.textContent = `${stock['銘柄名']} (${stock['コード']})`;
+                    selectElement.appendChild(option);
+                });
+            }
+            searchInput.addEventListener('keyup', filterStocks);
+            
+            const stockData = {{ stock_data | tojson }};
+
+            document.getElementById('prediction-form').addEventListener('submit', function() {
+                document.getElementById('predict-button').disabled = true;
+                document.getElementById('predict-button').textContent = '予測中...';
+                document.getElementById('predict-button').classList.add('opacity-75', 'cursor-not-allowed');
+                const prevPrediction = document.getElementById('prediction-result');
+                if (prevPrediction) {
+                    prevPrediction.classList.add('hidden');
+                }
+            });
+
+            {% if is_premium and stock_data and stock_data.dates %}
+                const ctx = document.getElementById('stockChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: stockData.dates,
+                        datasets: [{
+                            label: '終値',
+                            data: stockData.prices,
+                            borderColor: 'rgba(59, 130, 246, 1)',
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            fill: true,
+                            tension: 0.1
+                        }, {
+                            label: '翌日予測',
+                            data: [{
+                                x: stockData.dates[stockData.dates.length - 1],
+                                y: stockData.prices[stockData.prices.length - 1]
+                            }, {
+                                x: '翌日',
+                                y: stockData.predicted
+                            }],
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                            borderDash: [5, 5],
+                            pointRadius: 5,
+                            pointHoverRadius: 8
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    title: (context) => context[0].label === '翌日' ? '翌日予測' : context[0].label,
+                                    label: (context) => `株価: ¥${context.raw}`
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: '日付'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: '株価 (円)'
+                                }
+                            }
+                        }
+                    }
+                });
+            {% endif %}
+        </script>
+    </div>
+</body>
+</html>

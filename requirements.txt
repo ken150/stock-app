@@ -1,0 +1,1 @@
+Flaskgunicornstripepandasscikit-learnnumpytensorflow==2.12.0Flask-LoginFlask-LimiterFlask-SQLAlchemybcrypt==4.1.2yfinancepython-dotenv

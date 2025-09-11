@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>{{ '新規登録' if mode=='signup' else 'ログイン' }} - 株価予測</title>
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white w-full max-w-md p-8 rounded-xl shadow-lg">
+    <h1 class="text-2xl font-bold mb-6 text-center">{{ '新規登録' if mode=='signup' else 'ログイン' }}</h1>
+    {% if error %}<div class="mb-4 text-red-600">{{ error }}</div>{% endif %}
+    <form method="post" class="space-y-4">
+      <input name="email" type="email" placeholder="メールアドレス" required class="w-full p-3 border rounded-lg">
+      <input name="password" type="password" placeholder="パスワード" required class="w-full p-3 border rounded-lg">
+      <button class="w-full bg-blue-600 text-white p-3 rounded-lg">送信</button>
+    </form>
+    <div class="mt-4 text-center">
+      {% if mode=='signup' %}
+      既にアカウントがありますか？ <a class="text-blue-600" href="/login">ログイン</a>
+      {% else %}
+      初めての方は <a class="text-blue-600" href="/signup">新規登録</a>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

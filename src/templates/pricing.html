@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>料金プラン - 株価予測</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen p-6">
+  <div class="max-w-5xl mx-auto">
+    <header class="flex justify-between items-center mb-8">
+      <h1 class="text-2xl font-bold">料金プラン</h1>
+      <a href="/" class="text-blue-600">アプリへ戻る</a>
+    </header>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="bg-white p-6 rounded-xl shadow">
+        <h2 class="text-xl font-bold mb-2">Free</h2>
+        <ul class="space-y-2 text-gray-700">
+          <li>・1日1銘柄まで</li>
+          <li>・方向性のみ表示（上昇/下落）</li>
+          <li>・グラフは30日</li>
+        </ul>
+      </div>
+
+      <div class="bg-white p-6 rounded-xl shadow border-2 border-yellow-400">
+        <h2 class="text-xl font-bold mb-2">Premium（おすすめ）</h2>
+        <div class="text-3xl font-extrabold mb-4">¥1,280/月</div>
+        <ul class="space-y-2 text-gray-700">
+          <li>・無制限銘柄、数値予測</li>
+          <li>・グラフ90日、CSV出力</li>
+          <li>・精度指標・モデルアップデート優先</li>
+        </ul>
+        <form method="post" action="/create-checkout-session" class="mt-4">
+          <button class="w-full bg-yellow-500 hover:bg-yellow-600 text-white p-3 rounded-lg font-semibold">アップグレード</button>
+        </form>
+      </div>
+    </div>
+
+    <p class="mt-8 text-xs text-gray-500">
+      免責事項：本サービスは投資助言ではありません。投資判断は自己責任で行ってください。過去の成績は将来の成果を保証するものではありません。
+    </p>
+  </div>
+</body>
+</html>
