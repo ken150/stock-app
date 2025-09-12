@@ -297,17 +297,18 @@ def index():
 @login_required
 @limiter.limit("1/day", exempt_when=lambda: getattr(current_user, "is_premium", False) or is_dev_user())
 def predict():
-    if model is None:
-        is_premium = getattr(current_user, "is_premium", False) or is_dev_user()
-        return render_template('index.html', prediction="モデルがロードされていません。", stocks=stock_list, is_premium=is_premium)
-    
     is_premium = getattr(current_user, "is_premium", False) or is_dev_user()
+    
+    # モデルがロードされていない場合は、エラーメッセージを表示
+    if model is None:
+        # この修正により、'stock_data'が常に渡されるようになる
+        return render_template('index.html', prediction="モデルがロードされていません。", stocks=stock_list, stock_data=None, is_premium=is_premium)
 
     if not is_premium and not can_free_user_predict(current_user.id):
         return render_template('index.html',
                                prediction="無料プランの本日の利用回数を超えました。プランをアップグレードしてください。",
                                stocks=stock_list,
-                               stock_data=None,
+                               stock_data=None, # エラーハンドリング時も明示的にNoneを渡す
                                is_premium=is_premium)
     
     ticker_symbol = request.form['ticker']
@@ -317,7 +318,7 @@ def predict():
     data = yf.download(yfinance_ticker, period=period)
     
     if data.empty:
-        return render_template('index.html', prediction=f"'{ticker_symbol}'のデータが見つかりませんでした。", stocks=stock_list, is_premium=is_premium)
+        return render_template('index.html', prediction=f"'{ticker_symbol}'のデータが見つかりませんでした。", stocks=stock_list, stock_data=None, is_premium=is_premium)
     
     if isinstance(data['Close'], pd.DataFrame):
         close_prices = data['Close'].iloc[:, 0]
@@ -328,7 +329,7 @@ def predict():
     scaled_data = scaler.fit_transform(close_prices.values.reshape(-1, 1))
 
     if len(scaled_data) < 60:
-        return render_template('index.html', prediction="データが少なすぎます。", stocks=stock_list, is_premium=is_premium, stock_data=None)
+        return render_template('index.html', prediction="データが少なすぎます。", stocks=stock_list, stock_data=None, is_premium=is_premium)
 
     last_60_days = scaled_data[-60:]
     X_test = np.array([last_60_days])
@@ -354,7 +355,6 @@ def predict():
     }
     
     return render_template('index.html', prediction=prediction_text, stocks=stock_list, stock_data=stock_data, is_premium=is_premium)
-
 if __name__ == '__main__':
     init_db()
     
