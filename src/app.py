@@ -22,7 +22,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # === DB設定 ===
-DB_PATH = os.path.join(BASE_DIR, 'data', 'app.db')
+DB_PATH = os.path.join('/tmp', 'data', 'app.db')
 engine = create_engine(f"sqlite:///{DB_PATH}", echo=False, future=True)
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
