@@ -1,0 +1,30 @@
+services:
+  # Webサービスの設定
+  - type: web
+    name: stock-app
+    env: python
+    buildCommand: "./start.sh" # ワーカーが学習した後に起動
+    startCommand: "gunicorn --chdir src src.app:app"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13
+      - key: APP_SECRET_KEY
+        value: your-secret-key-here
+      - key: STRIPE_SECRET_KEY
+        value: your-stripe-secret-key
+      - key: STRIPE_PUBLISHABLE_KEY
+        value: your-stripe-publishable-key
+      - key: STRIPE_PRICE_ID_MONTHLY
+        value: your-stripe-price-id
+      - key: STRIPE_WEBHOOK_SECRET
+        value: your-webhook-secret
+
+  # バックグラウンドワーカーの設定
+  - type: worker
+    name: model-trainer
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python src/app.py train_and_save_model" # モデル学習のみを実行するコマンド
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13

@@ -53,39 +53,31 @@ def init_db():
         os.makedirs(os.path.dirname(DB_PATH))
     Base.metadata.create_all(engine)
 
-# === モデルとデータの自動生成関数 ===
-def create_model_and_data():
-    # データをダウンロード
-    print("日経平均株価データをダウンロードしています...")
+# === モデルの学習と保存（初回デプロイ時のみ実行） ===
+def train_and_save_model():
+    print("モデルの学習と保存を開始します...")
     data_dir = os.path.join(BASE_DIR, 'data')
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
         
     data_file_path = os.path.join(data_dir, 'N225_stock_data.csv')
     
-    if not os.path.exists(data_file_path):
-        print("日経平均株価データを20年間分ダウンロード中...")
-        # 20年分のデータをダウンロード
-        df_download = yf.download('^N225', start='2005-01-01', end=datetime.now().strftime('%Y-%m-%d'))
-        if not df_download.empty:
-            df_download.to_csv(data_file_path)
-            print("データダウンロード完了。")
-        else:
-            print("データダウンロードに失敗しました。")
-            return
+    print("日経平均株価データを20年間分ダウンロード中...")
+    df_download = yf.download('^N225', start='2005-01-01', end=datetime.now().strftime('%Y-%m-%d'))
+    if not df_download.empty:
+        df_download.to_csv(data_file_path)
+        print("データダウンロード完了。")
+    else:
+        print("データダウンロードに失敗しました。")
+        return
 
-    # モデルの学習
     print("モデルを学習しています...")
     try:
-        # CSVを読み込む際に、最初の列（日付）をインデックスとして指定
         df_train = pd.read_csv(data_file_path, index_col=0, parse_dates=True)
-        
-        # 'Close'列を数値に変換し、欠損値を削除
         if 'Close' not in df_train.columns:
             print("データファイルに 'Close' 列がありません。")
             return
-
-        # 'Close'列を数値に変換し、欠損値を削除
+            
         df_train['Close'] = pd.to_numeric(df_train['Close'], errors='coerce')
         df_train = df_train.dropna(subset=['Close'])
 
@@ -96,7 +88,6 @@ def create_model_and_data():
         scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(df_train['Close'].values.reshape(-1, 1))
 
-        # LSTMモデルの構築と学習
         model_instance = tf.keras.Sequential([
             tf.keras.layers.LSTM(50, return_sequences=True, input_shape=(60, 1)),
             tf.keras.layers.LSTM(50, return_sequences=False),
@@ -104,7 +95,7 @@ def create_model_and_data():
             tf.keras.layers.Dense(1)
         ])
         model_instance.compile(optimizer='adam', loss='mean_squared_error')
-
+        
         training_data = scaled_data[0:len(scaled_data)-60]
         x_train = []
         y_train = []
@@ -113,7 +104,7 @@ def create_model_and_data():
             y_train.append(training_data[i, 0])
         x_train, y_train = np.array(x_train), np.array(y_train)
         x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
-
+        
         model_instance.fit(x_train, y_train, batch_size=1, epochs=1)
 
         model_dir = os.path.join(BASE_DIR, 'models')
@@ -129,8 +120,20 @@ def create_model_and_data():
 app = Flask(__name__, template_folder='templates')
 app.secret_key = os.environ.get("APP_SECRET_KEY","dev-secret-change-me")
 
-# アプリインスタンスが作成された直後にモデルとデータを生成
-create_model_and_data()
+# モデルのロード
+model_path = os.path.join(BASE_DIR, 'models', 'stock_predictor_model.h5')
+model = None
+if os.path.exists(model_path):
+    print("学習済みモデルをロードしています...")
+    try:
+        model = tf.keras.models.load_model(model_path)
+        print("モデルのロードが完了しました。")
+    except Exception as e:
+        print(f"モデルのロードに失敗しました: {e}")
+else:
+    # モデルが存在しない場合のみ学習
+    print("モデルファイルが見つからないため、モデルの学習を行います。")
+    # train_and_save_model() # ここでは呼び出さない
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -281,15 +284,6 @@ def stripe_webhook():
 
     return "", 200
 
-# === 既存のアプリロジック ===
-try:
-    model_path = os.path.join(BASE_DIR, 'models', 'stock_predictor_model.h5')
-    model = tf.keras.models.load_model(model_path)
-except OSError:
-    print(f"モデルファイルが見つかりません: {model_path}")
-    print("アプリケーションを起動する前に、モデルが正常に作成されたか確認してください。")
-    model = None
-
 # 予測対象を日経平均株価に固定
 stock_list = [{'コード': 'N225', '銘柄名': '日経平均株価'}]
 
@@ -363,4 +357,9 @@ def predict():
 
 if __name__ == '__main__':
     init_db()
+    
+    # アプリ起動時にモデルファイルが存在するか確認し、なければ学習する
+    if not os.path.exists(model_path):
+        train_and_save_model()
+    
     app.run(debug=True)
