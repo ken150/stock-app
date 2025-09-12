@@ -56,69 +56,76 @@ def init_db():
 # === モデルとデータの自動生成関数 ===
 def create_model_and_data():
     # データをダウンロード
-    print("株価データをダウンロードしています...")
-    # stock_dataフォルダを作成
-    stock_data_dir = os.path.join(BASE_DIR, 'stock_data')
-    if not os.path.exists(stock_data_dir):
-        os.makedirs(stock_data_dir)
-
-    stock_list_path = os.path.join(stock_data_dir, 'stock_list.csv')
-    if not os.path.exists(stock_list_path):
-        print("JPXから銘柄リストをダウンロード中...")
-        try:
-            # yfinanceで主要な銘柄リストを取得する例に修正
-            # JPXのURLが不安定なため、より安定した方法に置き換える
-            topix_tickers = ['7203.T', '9984.T', '6758.T'] # 例として3つの銘柄を使用
-            stock_list_df = yf.download(topix_tickers, start='2020-01-01', end='2025-01-01', group_by='ticker')
-            stock_list_df.to_csv(stock_list_path)
-        except Exception as e:
-            print(f"銘柄リストのダウンロードに失敗しました: {e}")
-            # ダウンロードに失敗した場合のフォールバック
-            stock_list_df = pd.DataFrame({'コード': ['7203'], '銘柄名': ['トヨタ自動車']})
-            stock_list_df.to_csv(stock_list_path, index=False)
+    print("日経平均株価データをダウンロードしています...")
+    data_dir = os.path.join(BASE_DIR, 'data')
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+        
+    data_file_path = os.path.join(data_dir, 'N225_stock_data.csv')
     
-    data_file_path = os.path.join(BASE_DIR, 'data', '7203.T_stock_data.csv')
-    if not os.path.exists(os.path.dirname(data_file_path)):
-        os.makedirs(os.path.dirname(data_file_path))
     if not os.path.exists(data_file_path):
-        print("トヨタ自動車のデータをダウンロード中...")
-        df_download = yf.download('7203.T', start='2020-01-01', end='2025-01-01')
-        df_download.to_csv(data_file_path)
+        print("日経平均株価データを20年間分ダウンロード中...")
+        # 20年分のデータをダウンロード
+        df_download = yf.download('^N225', start='2005-01-01', end=datetime.now().strftime('%Y-%m-%d'))
+        if not df_download.empty:
+            df_download.to_csv(data_file_path)
+            print("データダウンロード完了。")
+        else:
+            print("データダウンロードに失敗しました。")
+            return
 
     # モデルの学習
     print("モデルを学習しています...")
-    df_train = pd.read_csv(data_file_path, header=0, index_col=0)
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(df_train['Close'].values.reshape(-1, 1))
+    try:
+        df_train = pd.read_csv(data_file_path)
+        
+        # 'Date'列をdatetime型に変換してインデックスに設定
+        if 'Date' in df_train.columns:
+            df_train['Date'] = pd.to_datetime(df_train['Date'])
+            df_train.set_index('Date', inplace=True)
+        else:
+            print("データファイルに 'Date' 列がありません。")
+            return
 
-    # ここにモデル学習のコードを記述
-    model_instance = tf.keras.Sequential([
-        tf.keras.layers.LSTM(50, return_sequences=True, input_shape=(60, 1)),
-        tf.keras.layers.LSTM(50, return_sequences=False),
-        tf.keras.layers.Dense(25),
-        tf.keras.layers.Dense(1)
-    ])
-    model_instance.compile(optimizer='adam', loss='mean_squared_error')
+        # 'Close'列を数値に変換し、欠損値を削除
+        df_train['Close'] = pd.to_numeric(df_train['Close'], errors='coerce')
+        df_train = df_train.dropna(subset=['Close'])
 
-    # データを学習用に準備
-    training_data = scaled_data[0:len(scaled_data)-60]
-    x_train = []
-    y_train = []
-    for i in range(60, len(training_data)):
-        x_train.append(training_data[i-60:i, 0])
-        y_train.append(training_data[i, 0])
-    x_train, y_train = np.array(x_train), np.array(y_train)
-    x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
+        if len(df_train) < 60:
+            print("学習に十分なデータ（60日分以上）がありません。")
+            return
 
-    # モデルを学習
-    model_instance.fit(x_train, y_train, batch_size=1, epochs=1)
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        scaled_data = scaler.fit_transform(df_train['Close'].values.reshape(-1, 1))
 
-    # モデルを保存
-    model_dir = os.path.join(BASE_DIR, 'models')
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-    model_instance.save(os.path.join(model_dir, 'stock_predictor_model.h5'))
-    print("モデルが正常に保存されました。")
+        # LSTMモデルの構築と学習
+        model_instance = tf.keras.Sequential([
+            tf.keras.layers.LSTM(50, return_sequences=True, input_shape=(60, 1)),
+            tf.keras.layers.LSTM(50, return_sequences=False),
+            tf.keras.layers.Dense(25),
+            tf.keras.layers.Dense(1)
+        ])
+        model_instance.compile(optimizer='adam', loss='mean_squared_error')
+
+        training_data = scaled_data[0:len(scaled_data)-60]
+        x_train = []
+        y_train = []
+        for i in range(60, len(training_data)):
+            x_train.append(training_data[i-60:i, 0])
+            y_train.append(training_data[i, 0])
+        x_train, y_train = np.array(x_train), np.array(y_train)
+        x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
+
+        model_instance.fit(x_train, y_train, batch_size=1, epochs=1)
+
+        model_dir = os.path.join(BASE_DIR, 'models')
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+        model_instance.save(os.path.join(model_dir, 'stock_predictor_model.h5'))
+        print("モデルが正常に保存されました。")
+
+    except Exception as e:
+        print(f"モデルの学習中にエラーが発生しました: {e}")
 
 # === Flask/認証設定 ===
 app = Flask(__name__, template_folder='templates')
@@ -277,38 +284,22 @@ def stripe_webhook():
     return "", 200
 
 # === 既存のアプリロジック ===
-# 学習済みモデルをロード
 try:
     model_path = os.path.join(BASE_DIR, 'models', 'stock_predictor_model.h5')
     model = tf.keras.models.load_model(model_path)
 except OSError:
     print(f"モデルファイルが見つかりません: {model_path}")
-    print("アプリケーションを起動する前に、train_model.py を実行してください。")
+    print("アプリケーションを起動する前に、モデルが正常に作成されたか確認してください。")
     model = None
 
-# 全銘柄リストを読み込む
-try:
-    stock_list_path = os.path.join(BASE_DIR, 'stock_data', 'stock_list.csv')
-    stock_list_df_full = pd.read_csv(stock_list_path, encoding='shift_jis')
-    stock_list_df = stock_list_df_full[stock_list_df_full['市場・商品区分'].str.contains('株式', na=False)]
-    stock_list_df = stock_list_df[stock_list_df['コード'].astype(str).str.isdigit()]
-    stock_list_df = stock_list_df[['コード', '銘柄名']].copy()
-    stock_list_df['コード'] = stock_list_df['コード'].astype(int)
-except FileNotFoundError:
-    print("stock_list.csv が見つかりませんでした。train_model.py を実行してください。")
-    stock_list_df = pd.DataFrame(columns=['コード', '銘柄名'])
-except KeyError:
-    print("CSVファイルの列名が正しくありません。")
-    stock_list_df = pd.DataFrame(columns=['コード', '銘柄名'])
-
-stock_list_df = stock_list_df.drop_duplicates(subset=['コード'])
+# 予測対象を日経平均株価に固定
+stock_list = [{'コード': 'N225', '銘柄名': '日経平均株価'}]
 
 @app.route('/')
 @login_required
 def index():
-    stocks = stock_list_df.to_dict('records')
     is_premium = getattr(current_user, "is_premium", False) or is_dev_user()
-    return render_template('index.html', stocks=stocks, stock_data=None, is_premium=is_premium)
+    return render_template('index.html', stocks=stock_list, stock_data=None, is_premium=is_premium)
 
 @app.route('/predict', methods=['POST'])
 @login_required
@@ -316,25 +307,25 @@ def index():
 def predict():
     if model is None:
         is_premium = getattr(current_user, "is_premium", False) or is_dev_user()
-        return render_template('index.html', prediction="モデルがロードされていません。", stocks=stock_list_df.to_dict('records'), is_premium=is_premium)
+        return render_template('index.html', prediction="モデルがロードされていません。", stocks=stock_list, is_premium=is_premium)
     
     is_premium = getattr(current_user, "is_premium", False) or is_dev_user()
 
     if not is_premium and not can_free_user_predict(current_user.id):
         return render_template('index.html',
                                prediction="無料プランの本日の利用回数を超えました。プランをアップグレードしてください。",
-                               stocks=stock_list_df.to_dict('records'),
+                               stocks=stock_list,
                                stock_data=None,
                                is_premium=is_premium)
     
     ticker_symbol = request.form['ticker']
-    yfinance_ticker = f"{ticker_symbol}.T"
+    yfinance_ticker = '^' + ticker_symbol if ticker_symbol == 'N225' else ticker_symbol
     
     period = "90d" if is_premium else "30d"
     data = yf.download(yfinance_ticker, period=period)
     
     if data.empty:
-        return render_template('index.html', prediction=f"'{ticker_symbol}'のデータが見つかりませんでした。", stocks=stock_list_df.to_dict('records'), is_premium=is_premium)
+        return render_template('index.html', prediction=f"'{ticker_symbol}'のデータが見つかりませんでした。", stocks=stock_list, is_premium=is_premium)
     
     if isinstance(data['Close'], pd.DataFrame):
         close_prices = data['Close'].iloc[:, 0]
@@ -345,27 +336,24 @@ def predict():
     scaled_data = scaler.fit_transform(close_prices.values.reshape(-1, 1))
 
     if len(scaled_data) < 60:
-        return render_template('index.html', prediction="データが少なすぎます。", stocks=stock_list_df.to_dict('records'), is_premium=is_premium,stock_data=None)
+        return render_template('index.html', prediction="データが少なすぎます。", stocks=stock_list, is_premium=is_premium, stock_data=None)
 
     last_60_days = scaled_data[-60:]
     X_test = np.array([last_60_days])
     predicted_stock_price = model.predict(X_test)
     predicted_stock_price = scaler.inverse_transform(predicted_stock_price)
 
-    try:
-        company_name = stock_list_df[stock_list_df['コード'] == int(ticker_symbol)]['銘柄名'].iloc[0]
-    except IndexError:
-        company_name = f"銘柄名不明 ({ticker_symbol})"
+    company_name = "日経平均株価"
     
     last_known_date = data.index[-1].date()
     predicted_date = last_known_date + timedelta(days=1)
     
     if is_premium:
-        prediction_text = f"{company_name} ({ticker_symbol}) の{predicted_date}の株価予測: {predicted_stock_price[0][0]:.2f}円"
+        prediction_text = f"{company_name} の{predicted_date}の予測値: {predicted_stock_price[0][0]:.2f}円"
     else:
         current_price = data['Close'].iloc[-1].item()
         direction = "上昇" if predicted_stock_price[0][0] > current_price else "下落"
-        prediction_text = f"{company_name} ({ticker_symbol}) の{predicted_date}の株価は{direction}傾向です。"
+        prediction_text = f"{company_name} の{predicted_date}は{direction}傾向です。"
 
     stock_data = {
         "dates": data.index.strftime("%Y-%m-%d").tolist(),
@@ -373,7 +361,7 @@ def predict():
         "predicted": float(predicted_stock_price[0][0])
     }
     
-    return render_template('index.html', prediction=prediction_text, stocks=stock_list_df.to_dict('records'), stock_data=stock_data, is_premium=is_premium)
+    return render_template('index.html', prediction=prediction_text, stocks=stock_list, stock_data=stock_data, is_premium=is_premium)
 
 if __name__ == '__main__':
     init_db()
