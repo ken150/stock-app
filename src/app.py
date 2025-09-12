@@ -122,7 +122,7 @@ def create_model_and_data():
 
 # === Flask/認証設定 ===
 app = Flask(__name__, template_folder='templates')
-app.secret_key = os.environ.get("APP_SECRET_KEY")
+app.secret_key = os.environ.get("APP_SECRET_KEY","dev-secret-change-me")
 
 # アプリインスタンスが作成された直後にモデルとデータを生成
 create_model_and_data()
@@ -377,5 +377,4 @@ def predict():
 
 if __name__ == '__main__':
     init_db()
-    create_model_and_data() # この行を追加
     app.run(debug=True)
