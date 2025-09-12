@@ -53,21 +53,30 @@ def init_db():
         os.makedirs(os.path.dirname(DB_PATH))
     Base.metadata.create_all(engine)
 
-# === Flask/認証設定 ===
-app = Flask(__name__, template_folder='templates')
-app.secret_key = os.environ.get("APP_SECRET_KEY", "dev-secret-change-me")
-
 # === モデルとデータの自動生成関数 ===
 def create_model_and_data():
     # データをダウンロード
     print("株価データをダウンロードしています...")
-    stock_list_path = os.path.join(BASE_DIR, 'stock_data', 'stock_list.csv')
-    if not os.path.exists(os.path.dirname(stock_list_path)):
-        os.makedirs(os.path.dirname(stock_list_path))
-    if not os.path.exists(stock_list_path):
-        stock_list_raw = pd.read_csv("https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.csv")
-        stock_list_raw.to_csv(stock_list_path, index=False)
+    # stock_dataフォルダを作成
+    stock_data_dir = os.path.join(BASE_DIR, 'stock_data')
+    if not os.path.exists(stock_data_dir):
+        os.makedirs(stock_data_dir)
 
+    stock_list_path = os.path.join(stock_data_dir, 'stock_list.csv')
+    if not os.path.exists(stock_list_path):
+        print("JPXから銘柄リストをダウンロード中...")
+        try:
+            # yfinanceで主要な銘柄リストを取得する例に修正
+            # JPXのURLが不安定なため、より安定した方法に置き換える
+            topix_tickers = ['7203.T', '9984.T', '6758.T'] # 例として3つの銘柄を使用
+            stock_list_df = yf.download(topix_tickers, start='2020-01-01', end='2025-01-01', group_by='ticker')
+            stock_list_df.to_csv(stock_list_path)
+        except Exception as e:
+            print(f"銘柄リストのダウンロードに失敗しました: {e}")
+            # ダウンロードに失敗した場合のフォールバック
+            stock_list_df = pd.DataFrame({'コード': ['7203'], '銘柄名': ['トヨタ自動車']})
+            stock_list_df.to_csv(stock_list_path, index=False)
+    
     data_file_path = os.path.join(BASE_DIR, 'data', '7203.T_stock_data.csv')
     if not os.path.exists(os.path.dirname(data_file_path)):
         os.makedirs(os.path.dirname(data_file_path))
@@ -83,13 +92,13 @@ def create_model_and_data():
     scaled_data = scaler.fit_transform(df_train['Close'].values.reshape(-1, 1))
 
     # ここにモデル学習のコードを記述
-    model = tf.keras.Sequential([
+    model_instance = tf.keras.Sequential([
         tf.keras.layers.LSTM(50, return_sequences=True, input_shape=(60, 1)),
         tf.keras.layers.LSTM(50, return_sequences=False),
         tf.keras.layers.Dense(25),
         tf.keras.layers.Dense(1)
     ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
+    model_instance.compile(optimizer='adam', loss='mean_squared_error')
 
     # データを学習用に準備
     training_data = scaled_data[0:len(scaled_data)-60]
@@ -102,14 +111,18 @@ def create_model_and_data():
     x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
 
     # モデルを学習
-    model.fit(x_train, y_train, batch_size=1, epochs=1)
+    model_instance.fit(x_train, y_train, batch_size=1, epochs=1)
 
     # モデルを保存
     model_dir = os.path.join(BASE_DIR, 'models')
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
-    model.save(os.path.join(model_dir, 'stock_predictor_model.h5'))
+    model_instance.save(os.path.join(model_dir, 'stock_predictor_model.h5'))
     print("モデルが正常に保存されました。")
+
+# === Flask/認証設定 ===
+app = Flask(__name__, template_folder='templates')
+app.secret_key = os.environ.get("APP_SECRET_KEY")
 
 # アプリインスタンスが作成された直後にモデルとデータを生成
 create_model_and_data()
