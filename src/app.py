@@ -47,12 +47,71 @@ class User(Base):
     def get_id(self):
         return str(self.id)
 
+# データベースの初期化
 def init_db():
+    if not os.path.exists(os.path.dirname(DB_PATH)):
+        os.makedirs(os.path.dirname(DB_PATH))
     Base.metadata.create_all(engine)
 
 # === Flask/認証設定 ===
 app = Flask(__name__, template_folder='templates')
 app.secret_key = os.environ.get("APP_SECRET_KEY", "dev-secret-change-me")
+
+# === モデルとデータの自動生成関数 ===
+def create_model_and_data():
+    # データをダウンロード
+    print("株価データをダウンロードしています...")
+    stock_list_path = os.path.join(BASE_DIR, 'stock_data', 'stock_list.csv')
+    if not os.path.exists(os.path.dirname(stock_list_path)):
+        os.makedirs(os.path.dirname(stock_list_path))
+    if not os.path.exists(stock_list_path):
+        stock_list_raw = pd.read_csv("https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.csv")
+        stock_list_raw.to_csv(stock_list_path, index=False)
+
+    data_file_path = os.path.join(BASE_DIR, 'data', '7203.T_stock_data.csv')
+    if not os.path.exists(os.path.dirname(data_file_path)):
+        os.makedirs(os.path.dirname(data_file_path))
+    if not os.path.exists(data_file_path):
+        print("トヨタ自動車のデータをダウンロード中...")
+        df_download = yf.download('7203.T', start='2020-01-01', end='2025-01-01')
+        df_download.to_csv(data_file_path)
+
+    # モデルの学習
+    print("モデルを学習しています...")
+    df_train = pd.read_csv(data_file_path, header=0, index_col=0)
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(df_train['Close'].values.reshape(-1, 1))
+
+    # ここにモデル学習のコードを記述
+    model = tf.keras.Sequential([
+        tf.keras.layers.LSTM(50, return_sequences=True, input_shape=(60, 1)),
+        tf.keras.layers.LSTM(50, return_sequences=False),
+        tf.keras.layers.Dense(25),
+        tf.keras.layers.Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # データを学習用に準備
+    training_data = scaled_data[0:len(scaled_data)-60]
+    x_train = []
+    y_train = []
+    for i in range(60, len(training_data)):
+        x_train.append(training_data[i-60:i, 0])
+        y_train.append(training_data[i, 0])
+    x_train, y_train = np.array(x_train), np.array(y_train)
+    x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
+
+    # モデルを学習
+    model.fit(x_train, y_train, batch_size=1, epochs=1)
+
+    # モデルを保存
+    model_dir = os.path.join(BASE_DIR, 'models')
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+    model.save(os.path.join(model_dir, 'stock_predictor_model.h5'))
+    print("モデルが正常に保存されました。")
+
+# アプリインスタンスが作成された直後にモデルとデータを生成
 create_model_and_data()
 
 login_manager = LoginManager()
@@ -62,9 +121,10 @@ login_manager.login_view = "login"
 limiter = Limiter(get_remote_address, app=app, default_limits=["200/day"])
 
 # === Stripe設定 ===
-stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "sk_test_xxxxx")
-PRICE_ID_MONTHLY = os.environ.get("STRIPE_PRICE_ID_MONTHLY", "price_XXXXXXXXXXXX")
-WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_xxxxx")
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
+STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY")
+PRICE_ID_MONTHLY = os.environ.get("STRIPE_PRICE_ID_MONTHLY")
+WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
 # === UserMixinラッパー ===
 class LoginUser(UserMixin):
@@ -204,6 +264,7 @@ def stripe_webhook():
     return "", 200
 
 # === 既存のアプリロジック ===
+# 学習済みモデルをロード
 try:
     model_path = os.path.join(BASE_DIR, 'models', 'stock_predictor_model.h5')
     model = tf.keras.models.load_model(model_path)
@@ -212,6 +273,7 @@ except OSError:
     print("アプリケーションを起動する前に、train_model.py を実行してください。")
     model = None
 
+# 全銘柄リストを読み込む
 try:
     stock_list_path = os.path.join(BASE_DIR, 'stock_data', 'stock_list.csv')
     stock_list_df_full = pd.read_csv(stock_list_path, encoding='shift_jis')
@@ -302,4 +364,5 @@ def predict():
 
 if __name__ == '__main__':
     init_db()
+    create_model_and_data() # この行を追加
     app.run(debug=True)
