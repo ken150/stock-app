@@ -300,4 +300,6 @@ def predict():
     return render_template('index.html', prediction=prediction_text, stocks=stock_list_df.to_dict('records'), stock_data=stock_data, is_premium=is_premium)
 
 if __name__ == '__main__':
+    init_db()
+    create_model_and_data() # この行を追加
     app.run(debug=True)
