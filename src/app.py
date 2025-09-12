@@ -77,14 +77,12 @@ def create_model_and_data():
     # モデルの学習
     print("モデルを学習しています...")
     try:
-        df_train = pd.read_csv(data_file_path)
+        # CSVを読み込む際に、最初の列（日付）をインデックスとして指定
+        df_train = pd.read_csv(data_file_path, index_col=0, parse_dates=True)
         
-        # 'Date'列をdatetime型に変換してインデックスに設定
-        if 'Date' in df_train.columns:
-            df_train['Date'] = pd.to_datetime(df_train['Date'])
-            df_train.set_index('Date', inplace=True)
-        else:
-            print("データファイルに 'Date' 列がありません。")
+        # 'Close'列を数値に変換し、欠損値を削除
+        if 'Close' not in df_train.columns:
+            print("データファイルに 'Close' 列がありません。")
             return
 
         # 'Close'列を数値に変換し、欠損値を削除
