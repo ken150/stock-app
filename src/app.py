@@ -53,6 +53,7 @@ def init_db():
 # === Flask/認証設定 ===
 app = Flask(__name__, template_folder='templates')
 app.secret_key = os.environ.get("APP_SECRET_KEY", "dev-secret-change-me")
+create_model_and_data()
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -301,5 +302,4 @@ def predict():
 
 if __name__ == '__main__':
     init_db()
-    create_model_and_data() # この行を追加
     app.run(debug=True)
