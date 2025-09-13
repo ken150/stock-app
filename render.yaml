@@ -3,28 +3,24 @@ services:
   - type: web
     name: stock-app
     env: python
-    buildCommand: "./start.sh" # ワーカーが学習した後に起動
+    buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn --chdir src src.app:app"
+    disk:
+      name: my-disk
+      path: /var/data
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.13
-      - key: APP_SECRET_KEY
-        value: your-secret-key-here
-      - key: STRIPE_SECRET_KEY
-        value: your-stripe-secret-key
-      - key: STRIPE_PUBLISHABLE_KEY
-        value: your-stripe-publishable-key
-      - key: STRIPE_PRICE_ID_MONTHLY
-        value: your-stripe-price-id
-      - key: STRIPE_WEBHOOK_SECRET
-        value: your-webhook-secret
+      # ... (環境変数) ...
+      - key: PORT
+        value: 10000
 
-  # バックグラウンドワーカーの設定
+  # ワーカー: モデル学習のみを担当
   - type: worker
     name: model-trainer
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python src/app.py train_and_save_model" # モデル学習のみを実行するコマンド
+    startCommand: "python -c 'from src.app import train_and_save_model; train_and_save_model()'"
+    disk:
+      name: my-disk
+      path: /var/data
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.13
+      # ... (環境変数) ...

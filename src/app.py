@@ -14,20 +14,25 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 import yfinance as yf
 from dotenv import load_dotenv
+import sys
 
 # === プロジェクトルートの絶対パス ===
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Renderのビルド環境とランタイム環境でパスが異なるため、os.getcwd()を使用
+BASE_DIR = os.getcwd()
 
 # === .env をロード ===
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # === DB設定 ===
-DB_PATH = os.path.join('/tmp', 'data', 'app.db')
+# Renderのディスクは /var/data にマウントされることを想定
+DISK_PATH = os.environ.get("DISK_PATH", os.path.join(BASE_DIR, 'persistent'))
+DB_PATH = os.path.join(DISK_PATH, 'app.db')
+
 engine = create_engine(f"sqlite:///{DB_PATH}", echo=False, future=True)
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
-class User(Base):
+class User(Base, UserMixin):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     email = Column(String, unique=True, index=True)
@@ -53,23 +58,32 @@ def init_db():
         os.makedirs(os.path.dirname(DB_PATH))
     Base.metadata.create_all(engine)
 
-# === モデルの学習と保存（初回デプロイ時のみ実行） ===
+# === モデルの学習と保存（ワーカー用） ===
 def train_and_save_model():
+    """モデルの学習と保存を一度だけ実行する関数"""
     print("モデルの学習と保存を開始します...")
+    model_dir = os.path.join(DISK_PATH, 'models')
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+    
     data_dir = os.path.join(BASE_DIR, 'data')
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
         
     data_file_path = os.path.join(data_dir, 'N225_stock_data.csv')
     
-    print("日経平均株価データを20年間分ダウンロード中...")
-    df_download = yf.download('^N225', start='2005-01-01', end=datetime.now().strftime('%Y-%m-%d'))
-    if not df_download.empty:
-        df_download.to_csv(data_file_path)
-        print("データダウンロード完了。")
+    # データが存在しない場合のみダウンロード
+    if not os.path.exists(data_file_path):
+        print("日経平均株価データを20年間分ダウンロード中...")
+        df_download = yf.download('^N225', start='2005-01-01', end=datetime.now().strftime('%Y-%m-%d'))
+        if not df_download.empty:
+            df_download.to_csv(data_file_path)
+            print("データダウンロード完了。")
+        else:
+            print("データダウンロードに失敗しました。学習をスキップします。")
+            return
     else:
-        print("データダウンロードに失敗しました。")
-        return
+        print("データファイルが既に存在するため、ダウンロードをスキップします。")
 
     print("モデルを学習しています...")
     try:
@@ -107,9 +121,6 @@ def train_and_save_model():
         
         model_instance.fit(x_train, y_train, batch_size=1, epochs=1)
 
-        model_dir = os.path.join(BASE_DIR, 'models')
-        if not os.path.exists(model_dir):
-            os.makedirs(model_dir)
         model_instance.save(os.path.join(model_dir, 'stock_predictor_model.h5'))
         print("モデルが正常に保存されました。")
 
@@ -121,7 +132,7 @@ app = Flask(__name__, template_folder='templates')
 app.secret_key = os.environ.get("APP_SECRET_KEY","dev-secret-change-me")
 
 # モデルのロード
-model_path = os.path.join(BASE_DIR, 'models', 'stock_predictor_model.h5')
+model_path = os.path.join(DISK_PATH, 'models', 'stock_predictor_model.h5')
 model = None
 if os.path.exists(model_path):
     print("学習済みモデルをロードしています...")
@@ -131,9 +142,7 @@ if os.path.exists(model_path):
     except Exception as e:
         print(f"モデルのロードに失敗しました: {e}")
 else:
-    # モデルが存在しない場合のみ学習
-    print("モデルファイルが見つからないため、モデルの学習を行います。")
-    # train_and_save_model() # ここでは呼び出さない
+    print("モデルファイルが見つからないため、予測機能は利用できません。ワーカーを起動してモデルを学習してください。")
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -299,16 +308,14 @@ def index():
 def predict():
     is_premium = getattr(current_user, "is_premium", False) or is_dev_user()
     
-    # モデルがロードされていない場合は、エラーメッセージを表示
     if model is None:
-        # この修正により、'stock_data'が常に渡されるようになる
         return render_template('index.html', prediction="モデルがロードされていません。", stocks=stock_list, stock_data=None, is_premium=is_premium)
 
     if not is_premium and not can_free_user_predict(current_user.id):
         return render_template('index.html',
                                prediction="無料プランの本日の利用回数を超えました。プランをアップグレードしてください。",
                                stocks=stock_list,
-                               stock_data=None, # エラーハンドリング時も明示的にNoneを渡す
+                               stock_data=None,
                                is_premium=is_premium)
     
     ticker_symbol = request.form['ticker']
@@ -355,11 +362,13 @@ def predict():
     }
     
     return render_template('index.html', prediction=prediction_text, stocks=stock_list, stock_data=stock_data, is_premium=is_premium)
+
+
+# モデル学習ワーカー用のコマンドライン引数ハンドリング
 if __name__ == '__main__':
-    init_db()
-    
-    # アプリ起動時にモデルファイルが存在するか確認し、なければ学習する
-    if not os.path.exists(model_path):
+    if len(sys.argv) > 1 and sys.argv[1] == 'train_and_save_model':
+        init_db()
         train_and_save_model()
-    
-    app.run(debug=True)
+    else:
+        init_db()
+        app.run(debug=True)
